@@ -1,0 +1,1468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PG Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1f2e;
+            color: #ffffff;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        /* Loading overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(26, 31, 46, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .loading-overlay.hidden {
+            display: none;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #3a4459;
+            border-top-color: #4a9eff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            margin-top: 20px;
+            color: #8899aa;
+            font-size: 14px;
+        }
+
+        .login-container {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .login-btn {
+            padding: 15px 40px;
+            background-color: #4a9eff;
+            border: none;
+            border-radius: 6px;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        .login-btn:hover {
+            background-color: #3a8eef;
+        }
+
+        .error-message {
+            color: #e74c3c;
+            margin-top: 15px;
+            padding: 10px;
+            background-color: rgba(231, 76, 60, 0.1);
+            border-radius: 4px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background-color: #252d3d;
+            border-bottom: 1px solid #3a4459;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 500;
+            color: #4a9eff;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .refresh-btn {
+            padding: 8px 16px;
+            background-color: #3a4459;
+            border: none;
+            border-radius: 4px;
+            color: #8899aa;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .refresh-btn:hover {
+            background-color: #4a5569;
+            color: white;
+        }
+
+        .user-info {
+            color: #8899aa;
+            font-size: 12px;
+        }
+
+        .logout-btn {
+            padding: 6px 12px;
+            background-color: transparent;
+            border: 1px solid #3a4459;
+            border-radius: 4px;
+            color: #8899aa;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .logout-btn:hover {
+            border-color: #e74c3c;
+            color: #e74c3c;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 5px;
+        }
+
+        .nav-tab {
+            padding: 8px 16px;
+            background-color: #3a4459;
+            border: none;
+            border-radius: 4px;
+            color: #8899aa;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .nav-tab.active {
+            background-color: #4a9eff;
+            color: white;
+        }
+
+        .logo {
+            height: 30px;
+        }
+
+        /* Filters */
+        .filters {
+            display: flex;
+            gap: 15px;
+            padding: 15px 20px;
+            background-color: #252d3d;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .filter-label {
+            font-size: 10px;
+            color: #8899aa;
+            text-transform: uppercase;
+        }
+
+        .filter-select {
+            padding: 6px 12px;
+            background-color: #1a1f2e;
+            border: 1px solid #3a4459;
+            border-radius: 4px;
+            color: #ffffff;
+            font-size: 12px;
+            min-width: 150px;
+        }
+
+        /* Main Content */
+        .main-content {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Dashboard Sections */
+        .section {
+            background-color: #252d3d;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .section-header {
+            background-color: #2d6ca2;
+            padding: 10px 15px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .section-content {
+            padding: 0;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid #3a4459;
+        }
+
+        th {
+            background-color: #2a3347;
+            font-weight: 500;
+            color: #8899aa;
+            font-size: 11px;
+            text-transform: uppercase;
+            position: sticky;
+            top: 0;
+        }
+
+        tr:hover {
+            background-color: #2a3347;
+        }
+
+        /* Attainment colors */
+        .attainment-high {
+            background-color: rgba(39, 174, 96, 0.3);
+            color: #2ecc71;
+        }
+
+        .attainment-medium {
+            background-color: rgba(241, 196, 15, 0.3);
+            color: #f1c40f;
+        }
+
+        .attainment-low {
+            background-color: rgba(231, 76, 60, 0.3);
+            color: #e74c3c;
+        }
+
+        /* Numbers */
+        .number {
+            font-family: 'Consolas', monospace;
+            text-align: right;
+        }
+
+        /* Grid layouts */
+        .two-columns {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .three-columns {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 1200px) {
+            .two-columns, .three-columns {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Scrollable table container */
+        .table-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .table-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .table-container::-webkit-scrollbar-track {
+            background: #1a1f2e;
+        }
+
+        .table-container::-webkit-scrollbar-thumb {
+            background: #3a4459;
+            border-radius: 4px;
+        }
+
+        /* Summary row */
+        .summary-row {
+            background-color: #1a3a5c !important;
+            font-weight: bold;
+        }
+
+        .summary-row:hover {
+            background-color: #1a3a5c !important;
+        }
+
+        /* Last updated */
+        .last-updated {
+            text-align: right;
+            color: #8899aa;
+            font-size: 11px;
+            padding: 10px 20px;
+        }
+
+        /* Stage badge */
+        .stage-badge {
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            background-color: #3a4459;
+        }
+
+        /* Welcome message */
+        .welcome {
+            font-size: 14px;
+            color: #8899aa;
+        }
+
+        /* Status indicator */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 20px;
+            background-color: #1a3a5c;
+            font-size: 11px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #2ecc71;
+        }
+
+        .status-dot.loading {
+            background-color: #f1c40f;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading/Login Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="login-container" id="login-container">
+            <h2 style="color: #4a9eff; margin-bottom: 10px;">PG Dashboard</h2>
+            <p style="color: #8899aa; margin-bottom: 20px;">Connect to Salesforce to view your dashboard</p>
+            <button class="login-btn" onclick="loginToSalesforce()">Login with Salesforce</button>
+            <div id="login-error" class="error-message" style="display: none;"></div>
+        </div>
+        <div id="loading-spinner" style="display: none;">
+            <div class="spinner"></div>
+            <div class="loading-text" id="loading-status">Connecting to Salesforce...</div>
+        </div>
+    </div>
+
+    <header class="header">
+        <div class="header-left">
+            <span class="welcome">Welcome, <span id="user-name">User</span>.</span>
+            <div class="nav-tabs">
+                <button class="nav-tab active">Main</button>
+                <button class="nav-tab">Accounts</button>
+                <button class="nav-tab">Leads</button>
+            </div>
+            <h1>PG Dashboard</h1>
+        </div>
+        <div class="header-right">
+            <button class="refresh-btn" onclick="refreshData()">Refresh Data</button>
+            <span class="user-info" id="org-info"></span>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </header>
+
+    <div class="status-bar">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-text">Connected</span>
+        <span style="margin-left: auto;">Last updated: <span id="last-updated">-</span></span>
+    </div>
+
+    <div class="filters">
+        <div class="filter-group">
+            <span class="filter-label">Account Executive</span>
+            <select class="filter-select" id="filter-ae" onchange="applyFilters()">
+                <option value="">All</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <span class="filter-label">Time Period</span>
+            <select class="filter-select" id="filter-period" onchange="applyFilters()">
+                <option value="current_week">Current Week</option>
+                <option value="last_week">Last Week</option>
+                <option value="current_month" selected>Current Month</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <span class="filter-label">Customer Vertical</span>
+            <select class="filter-select" id="filter-vertical" onchange="applyFilters()">
+                <option value="">All</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <span class="filter-label">Fiscal Quarter</span>
+            <select class="filter-select" id="filter-fq">
+                <option value="">Current FQ</option>
+            </select>
+        </div>
+    </div>
+
+    <main class="main-content">
+        <!-- Qualified Opportunities Built vs Pacing Goals -->
+        <section class="section">
+            <div class="section-header">Qualified opportunities built vs pacing goals</div>
+            <div class="section-content">
+                <div class="table-container">
+                    <table id="goals-table">
+                        <thead>
+                            <tr>
+                                <th>Account Executive</th>
+                                <th class="number">MTD - Actuals</th>
+                                <th class="number">MTD - Goals</th>
+                                <th class="number">MTD - % Attainment</th>
+                                <th class="number">QTD - Actuals</th>
+                                <th class="number">QTD - Goals</th>
+                                <th class="number">QTD - % Attainment</th>
+                                <th class="number">YTD - Actuals</th>
+                                <th class="number">YTD - Goals</th>
+                                <th class="number">YTD - % Attainment</th>
+                            </tr>
+                        </thead>
+                        <tbody id="goals-body">
+                            <tr><td colspan="10" style="text-align:center;color:#8899aa;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pipeline Build Tables -->
+        <div class="two-columns">
+            <section class="section">
+                <div class="section-header">Month to date pipeline build</div>
+                <div class="section-content">
+                    <div class="table-container">
+                        <table id="mtd-pipeline-table">
+                            <thead>
+                                <tr>
+                                    <th>Owner</th>
+                                    <th>Opportunity Type</th>
+                                    <th>Opportunity</th>
+                                    <th>Qualified Date</th>
+                                    <th>Stage</th>
+                                    <th class="number">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mtd-pipeline-body">
+                                <tr><td colspan="6" style="text-align:center;color:#8899aa;">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="section-header">Quarter to date pipeline build</div>
+                <div class="section-content">
+                    <div class="table-container">
+                        <table id="qtd-pipeline-table">
+                            <thead>
+                                <tr>
+                                    <th>Owner</th>
+                                    <th>Opportunity Type</th>
+                                    <th>Opportunity</th>
+                                    <th>Qualified Date</th>
+                                    <th>Stage</th>
+                                    <th class="number">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody id="qtd-pipeline-body">
+                                <tr><td colspan="6" style="text-align:center;color:#8899aa;">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Activity Metrics -->
+        <div class="two-columns">
+            <section class="section">
+                <div class="section-header">Prospecting emails</div>
+                <div class="section-content">
+                    <div class="table-container">
+                        <table id="emails-table">
+                            <thead>
+                                <tr>
+                                    <th>Assigned To</th>
+                                    <th class="number">Last 7 days</th>
+                                    <th class="number">Last 30 days</th>
+                                </tr>
+                            </thead>
+                            <tbody id="emails-body">
+                                <tr><td colspan="3" style="text-align:center;color:#8899aa;">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="section-header">Completed prospecting meetings last 7 and 30 days</div>
+                <div class="section-content">
+                    <div class="table-container">
+                        <table id="meetings-table">
+                            <thead>
+                                <tr>
+                                    <th>Assigned To</th>
+                                    <th class="number">Last 7 days</th>
+                                    <th class="number">Last 30 days</th>
+                                </tr>
+                            </thead>
+                            <tbody id="meetings-body">
+                                <tr><td colspan="3" style="text-align:center;color:#8899aa;">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Stage 0+ Opps -->
+        <div class="two-columns">
+            <section class="section">
+                <div class="section-header">Stage 0+ opps by source</div>
+                <div class="section-content">
+                    <div class="table-container">
+                        <table id="stage0-table">
+                            <thead>
+                                <tr>
+                                    <th>Owner</th>
+                                    <th>Primary Opp Source</th>
+                                    <th class="number">Count</th>
+                                    <th class="number">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody id="stage0-body">
+                                <tr><td colspan="4" style="text-align:center;color:#8899aa;">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="section-header">Quarter to date pre-qualified pipeline built</div>
+                <div class="section-content">
+                    <div class="table-container">
+                        <table id="prequalified-table">
+                            <thead>
+                                <tr>
+                                    <th>Owner</th>
+                                    <th>Opportunity</th>
+                                    <th>Stage</th>
+                                    <th class="number">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody id="prequalified-body">
+                                <tr><td colspan="4" style="text-align:center;color:#8899aa;">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Accounts Touched -->
+        <section class="section">
+            <div class="section-header">Accounts touched last 7 and 30 days</div>
+            <div class="section-content">
+                <div class="table-container">
+                    <table id="accounts-touched-table">
+                        <thead>
+                            <tr>
+                                <th>Account Owner</th>
+                                <th class="number">Total Accounts</th>
+                                <th class="number">Touched 7 days</th>
+                                <th class="number">% touched 7 days</th>
+                                <th class="number">Touched 30 days</th>
+                                <th class="number">% touched 30 days</th>
+                            </tr>
+                        </thead>
+                        <tbody id="accounts-touched-body">
+                            <tr><td colspan="6" style="text-align:center;color:#8899aa;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Accounts Without Activities -->
+        <section class="section">
+            <div class="section-header">Accounts without activities in the last 30 days</div>
+            <div class="section-content">
+                <div class="table-container">
+                    <table id="accounts-inactive-table">
+                        <thead>
+                            <tr>
+                                <th>Account Name</th>
+                                <th>Account Owner</th>
+                                <th>Customer Vertical</th>
+                                <th>Prioritization</th>
+                                <th>Last Activity Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="accounts-inactive-body">
+                            <tr><td colspan="5" style="text-align:center;color:#8899aa;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // =============================================================================
+        // CONFIGURATION
+        // =============================================================================
+
+        const CONFIG = {
+            // Salesforce Connected App settings
+            // You need to create a Connected App in Salesforce Setup
+            clientId: '3MVG9pRzvMkjMb6lQhPSkrCbTuQBJB7HoL7WVaXSHgDDLgqUiT3kMQYRmNnGUCqfLaKYvJ4Wlj0nA_flbFZnB',
+            redirectUri: window.location.origin + window.location.pathname,
+            loginUrl: 'https://login.salesforce.com',
+
+            // Team mappings (from CRMA recipe)
+            teamMappings: {
+                "Enterprise - Charlie": [
+                    "Charlie Virden", "Isabel Pawloff", "Steve Marsh", "John Wainwright",
+                    "Jonathan Andrews", "Josh Abrams", "Jason Landry", "Craig Beal", "Jessica Tissera"
+                ],
+                "Enterprise - Lloyd": [
+                    "Lloyd Cope", "Andrew Breslauer", "Ben Wright", "Jonathon Lieberman",
+                    "Grant Bettendorf", "Marc Yablonsky", "Andrew Kamar"
+                ],
+                "Insurance": ["Eugene Sazanov"]
+            },
+
+            // Vertical mappings
+            verticalMappings: {
+                "US Federal": "Federal",
+                "Int'l Government": "International Gov",
+                "Shipping_Logistics": "Logistics",
+                "UK_Government": "International Gov"
+            },
+
+            // Source mappings
+            sourceMappings: {
+                "Marketing Inbound": "Marketing",
+                "Events (In Person)": "Marketing",
+                "6. Marketing Inbound": "Marketing",
+                "7. Events (In Person)": "Marketing"
+            },
+
+            // Fiscal year starts in February
+            fiscalYearStartMonth: 2
+        };
+
+        // =============================================================================
+        // STATE
+        // =============================================================================
+
+        let state = {
+            accessToken: null,
+            instanceUrl: null,
+            userId: null,
+            userName: null,
+            opportunities: [],
+            accounts: [],
+            tasks: [],
+            events: [],
+            goals: []
+        };
+
+        // =============================================================================
+        // SALESFORCE OAUTH
+        // =============================================================================
+
+        function loginToSalesforce() {
+            const authUrl = `${CONFIG.loginUrl}/services/oauth2/authorize?` +
+                `response_type=token&` +
+                `client_id=${encodeURIComponent(CONFIG.clientId)}&` +
+                `redirect_uri=${encodeURIComponent(CONFIG.redirectUri)}`;
+
+            window.location.href = authUrl;
+        }
+
+        function checkAuthCallback() {
+            // Check if we have a hash with access token (OAuth callback)
+            if (window.location.hash) {
+                const params = new URLSearchParams(window.location.hash.substring(1));
+                const accessToken = params.get('access_token');
+                const instanceUrl = params.get('instance_url');
+
+                if (accessToken && instanceUrl) {
+                    state.accessToken = accessToken;
+                    state.instanceUrl = instanceUrl;
+
+                    // Store in session
+                    sessionStorage.setItem('sf_access_token', accessToken);
+                    sessionStorage.setItem('sf_instance_url', instanceUrl);
+
+                    // Clear the hash
+                    history.replaceState(null, null, window.location.pathname);
+
+                    return true;
+                }
+            }
+
+            // Check session storage
+            const storedToken = sessionStorage.getItem('sf_access_token');
+            const storedInstance = sessionStorage.getItem('sf_instance_url');
+
+            if (storedToken && storedInstance) {
+                state.accessToken = storedToken;
+                state.instanceUrl = storedInstance;
+                return true;
+            }
+
+            return false;
+        }
+
+        function logout() {
+            sessionStorage.removeItem('sf_access_token');
+            sessionStorage.removeItem('sf_instance_url');
+            state.accessToken = null;
+            state.instanceUrl = null;
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            document.getElementById('login-container').style.display = 'block';
+            document.getElementById('loading-spinner').style.display = 'none';
+        }
+
+        // =============================================================================
+        // SALESFORCE API
+        // =============================================================================
+
+        async function sfQuery(soql) {
+            const url = `${state.instanceUrl}/services/data/v59.0/query?q=${encodeURIComponent(soql)}`;
+
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${state.accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    logout();
+                    throw new Error('Session expired. Please login again.');
+                }
+                throw new Error(`Query failed: ${response.status}`);
+            }
+
+            const data = await response.json();
+            return data.records || [];
+        }
+
+        async function getUserInfo() {
+            const url = `${state.instanceUrl}/services/oauth2/userinfo`;
+
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${state.accessToken}`
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                state.userId = data.user_id;
+                state.userName = data.name;
+                document.getElementById('user-name').textContent = data.name || 'User';
+                document.getElementById('org-info').textContent = data.organization_id || '';
+            }
+        }
+
+        // =============================================================================
+        // DATA FETCHING
+        // =============================================================================
+
+        async function fetchAllData() {
+            setLoadingStatus('Fetching opportunities...');
+            state.opportunities = await sfQuery(`
+                SELECT Id, Name, Account.Name, Owner.Name, StageName, Amount, CloseDate,
+                       CreatedDate, Type, IsClosed, IsWon, Qualified_Date__c, Source__c,
+                       Fml_Customer_Vertical__c
+                FROM Opportunity
+                WHERE CreatedDate >= LAST_N_DAYS:365
+                ORDER BY CreatedDate DESC
+                LIMIT 2000
+            `);
+
+            setLoadingStatus('Fetching accounts...');
+            state.accounts = await sfQuery(`
+                SELECT Id, Name, Owner.Name, Commercial_Vertical__c, Industry_Segment__c,
+                       Overall_Account_Prioritization__c, LastActivityDate
+                FROM Account
+                WHERE IsDeleted = false
+                ORDER BY LastActivityDate DESC NULLS LAST
+                LIMIT 2000
+            `);
+
+            setLoadingStatus('Fetching tasks...');
+            state.tasks = await sfQuery(`
+                SELECT Id, Subject, Owner.Name, AccountId, Account.Name,
+                       ActivityDate, CreatedDate, TaskSubtype, Status
+                FROM Task
+                WHERE CreatedDate >= LAST_N_DAYS:90
+                AND IsDeleted = false
+                AND (TaskSubtype = 'Email' OR TaskSubtype = 'Call')
+                ORDER BY CreatedDate DESC
+                LIMIT 2000
+            `);
+
+            setLoadingStatus('Fetching events...');
+            state.events = await sfQuery(`
+                SELECT Id, Subject, Owner.Name, AccountId, Account.Name,
+                       StartDateTime, EndDateTime, CreatedDate, Type
+                FROM Event
+                WHERE CreatedDate >= LAST_N_DAYS:90
+                AND IsDeleted = false
+                ORDER BY StartDateTime DESC
+                LIMIT 2000
+            `);
+
+            setLoadingStatus('Fetching goals...');
+            try {
+                state.goals = await sfQuery(`
+                    SELECT Id, Name, Owner.Name, RecordType.Name,
+                           Start_Date__c, End_Date__c, Week_Counter__c,
+                           Weekly_Pipeline_Build_Goal__c, Weekly_Pipeline_Build__c,
+                           Cumulative_Pipeline_Build_Goal__c, Cumulative_Pipeline_Build__c,
+                           Quarter_Pipeline_Goal__c, Quota__c
+                    FROM Goal__c
+                    WHERE Start_Date__c >= LAST_N_DAYS:365
+                    ORDER BY Start_Date__c DESC
+                    LIMIT 500
+                `);
+            } catch (e) {
+                console.warn('Could not fetch goals:', e);
+                state.goals = [];
+            }
+        }
+
+        // =============================================================================
+        // DATA TRANSFORMATION
+        // =============================================================================
+
+        function getOwnerName(record) {
+            return record.Owner?.Name || '';
+        }
+
+        function getAccountName(record) {
+            return record.Account?.Name || '';
+        }
+
+        function normalizeVertical(vertical) {
+            if (!vertical) return null;
+            if (vertical.includes('.')) {
+                const parts = vertical.split('.');
+                if (parts.length > 1) vertical = parts[1].trim();
+            }
+            return CONFIG.verticalMappings[vertical] || vertical;
+        }
+
+        function normalizeSource(source) {
+            if (!source) return null;
+            if (source.includes('.')) {
+                const parts = source.split('.');
+                if (parts.length > 1) source = parts[1].trim();
+            }
+            return CONFIG.sourceMappings[source] || source;
+        }
+
+        function assignTeam(ownerName) {
+            if (!ownerName) return null;
+            for (const [team, members] of Object.entries(CONFIG.teamMappings)) {
+                for (const member of members) {
+                    if (ownerName.toLowerCase().includes(member.toLowerCase())) {
+                        return team;
+                    }
+                }
+            }
+            return null;
+        }
+
+        function getAllTeamMembers() {
+            const members = new Set();
+            for (const teamMembers of Object.values(CONFIG.teamMappings)) {
+                teamMembers.forEach(m => members.add(m));
+            }
+            return Array.from(members).sort();
+        }
+
+        // =============================================================================
+        // DATE HELPERS
+        // =============================================================================
+
+        function getFiscalYearStart(date = new Date()) {
+            const month = CONFIG.fiscalYearStartMonth;
+            if (date.getMonth() + 1 >= month) {
+                return new Date(date.getFullYear(), month - 1, 1);
+            }
+            return new Date(date.getFullYear() - 1, month - 1, 1);
+        }
+
+        function getFiscalQuarterStart(date = new Date()) {
+            const fyStart = getFiscalYearStart(date);
+            const monthsIntoFY = (date.getFullYear() - fyStart.getFullYear()) * 12 +
+                                 date.getMonth() - fyStart.getMonth();
+            const quarter = Math.floor(monthsIntoFY / 3);
+            return new Date(fyStart.getFullYear(), fyStart.getMonth() + quarter * 3, 1);
+        }
+
+        function getMonthStart(date = new Date()) {
+            return new Date(date.getFullYear(), date.getMonth(), 1);
+        }
+
+        function parseDate(dateStr) {
+            if (!dateStr) return null;
+            return new Date(dateStr);
+        }
+
+        function formatDate(date) {
+            if (!date) return '-';
+            if (typeof date === 'string') date = new Date(date);
+            return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+        }
+
+        function formatCurrency(value) {
+            if (value === null || value === undefined) return '-';
+            return '$' + Math.round(value).toLocaleString();
+        }
+
+        function formatPercent(value) {
+            if (value === null || value === undefined) return '-';
+            return Math.round(value) + '%';
+        }
+
+        // =============================================================================
+        // DASHBOARD CALCULATIONS
+        // =============================================================================
+
+        function calculateGoalsTable() {
+            const today = new Date();
+            const monthStart = getMonthStart();
+            const quarterStart = getFiscalQuarterStart();
+            const yearStart = getFiscalYearStart();
+
+            const teamMembers = getAllTeamMembers();
+            const results = [];
+
+            for (const member of teamMembers) {
+                // Filter qualified opps for this member
+                const memberOpps = state.opportunities.filter(opp => {
+                    const ownerName = getOwnerName(opp);
+                    return ownerName.toLowerCase().includes(member.toLowerCase()) &&
+                           opp.Qualified_Date__c;
+                });
+
+                // MTD
+                const mtdOpps = memberOpps.filter(opp =>
+                    parseDate(opp.Qualified_Date__c) >= monthStart
+                );
+                const mtdActuals = mtdOpps.reduce((sum, opp) => sum + (opp.Amount || 0), 0);
+
+                // QTD
+                const qtdOpps = memberOpps.filter(opp =>
+                    parseDate(opp.Qualified_Date__c) >= quarterStart
+                );
+                const qtdActuals = qtdOpps.reduce((sum, opp) => sum + (opp.Amount || 0), 0);
+
+                // YTD
+                const ytdOpps = memberOpps.filter(opp =>
+                    parseDate(opp.Qualified_Date__c) >= yearStart
+                );
+                const ytdActuals = ytdOpps.reduce((sum, opp) => sum + (opp.Amount || 0), 0);
+
+                // Goals (simplified - use actual goals if available)
+                const memberGoals = state.goals.filter(g =>
+                    getOwnerName(g).toLowerCase().includes(member.toLowerCase())
+                );
+                const quarterGoal = memberGoals.reduce((sum, g) =>
+                    sum + (g.Quarter_Pipeline_Goal__c || 0), 0) || 300000;
+                const mtdGoal = quarterGoal / 3;
+                const ytdGoal = quarterGoal * 4;
+
+                if (mtdActuals > 0 || qtdActuals > 0 || ytdActuals > 0) {
+                    results.push({
+                        accountExecutive: member,
+                        mtdActuals, mtdGoal,
+                        mtdAttainment: mtdGoal ? (mtdActuals / mtdGoal * 100) : 0,
+                        qtdActuals, qtdGoal: quarterGoal,
+                        qtdAttainment: quarterGoal ? (qtdActuals / quarterGoal * 100) : 0,
+                        ytdActuals, ytdGoal,
+                        ytdAttainment: ytdGoal ? (ytdActuals / ytdGoal * 100) : 0
+                    });
+                }
+            }
+
+            return results;
+        }
+
+        function calculatePipelineData(period) {
+            const today = new Date();
+            const startDate = period === 'mtd' ? getMonthStart() : getFiscalQuarterStart();
+
+            return state.opportunities
+                .filter(opp => opp.Qualified_Date__c && parseDate(opp.Qualified_Date__c) >= startDate)
+                .map(opp => ({
+                    owner: getOwnerName(opp),
+                    type: opp.Type || '',
+                    name: opp.Name,
+                    qualifiedDate: opp.Qualified_Date__c,
+                    stage: opp.StageName,
+                    amount: opp.Amount || 0
+                }))
+                .sort((a, b) => b.amount - a.amount)
+                .slice(0, 20);
+        }
+
+        function calculateActivityMetrics() {
+            const today = new Date();
+            const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+            const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+            const teamMembers = getAllTeamMembers();
+            const emails = [];
+            const meetings = [];
+
+            for (const member of teamMembers) {
+                // Emails
+                const memberEmails = state.tasks.filter(t =>
+                    getOwnerName(t).toLowerCase().includes(member.toLowerCase()) &&
+                    t.TaskSubtype === 'Email'
+                );
+                const email7 = memberEmails.filter(t => parseDate(t.CreatedDate) >= sevenDaysAgo).length;
+                const email30 = memberEmails.filter(t => parseDate(t.CreatedDate) >= thirtyDaysAgo).length;
+
+                if (email7 > 0 || email30 > 0) {
+                    emails.push({ assignedTo: member, last7Days: email7, last30Days: email30 });
+                }
+
+                // Meetings
+                const memberEvents = state.events.filter(e =>
+                    getOwnerName(e).toLowerCase().includes(member.toLowerCase())
+                );
+                const meeting7 = memberEvents.filter(e => parseDate(e.StartDateTime) >= sevenDaysAgo).length;
+                const meeting30 = memberEvents.filter(e => parseDate(e.StartDateTime) >= thirtyDaysAgo).length;
+
+                if (meeting7 > 0 || meeting30 > 0) {
+                    meetings.push({ assignedTo: member, last7Days: meeting7, last30Days: meeting30 });
+                }
+            }
+
+            return { emails, meetings };
+        }
+
+        function calculateAccountsTouched() {
+            const today = new Date();
+            const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+            const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+            // Group accounts by owner
+            const ownerAccounts = {};
+            for (const account of state.accounts) {
+                const owner = getOwnerName(account);
+                if (!owner) continue;
+                if (!ownerAccounts[owner]) ownerAccounts[owner] = [];
+                ownerAccounts[owner].push(account);
+            }
+
+            const results = [];
+            for (const [owner, accounts] of Object.entries(ownerAccounts)) {
+                const total = accounts.length;
+                const touched7 = accounts.filter(a =>
+                    a.LastActivityDate && parseDate(a.LastActivityDate) >= sevenDaysAgo
+                ).length;
+                const touched30 = accounts.filter(a =>
+                    a.LastActivityDate && parseDate(a.LastActivityDate) >= thirtyDaysAgo
+                ).length;
+
+                results.push({
+                    owner,
+                    total,
+                    touched7,
+                    pct7: total ? (touched7 / total * 100) : 0,
+                    touched30,
+                    pct30: total ? (touched30 / total * 100) : 0
+                });
+            }
+
+            return results.sort((a, b) => b.pct30 - a.pct30);
+        }
+
+        function calculateInactiveAccounts() {
+            const today = new Date();
+            const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+            return state.accounts
+                .filter(a => !a.LastActivityDate || parseDate(a.LastActivityDate) < thirtyDaysAgo)
+                .slice(0, 50)
+                .map(a => ({
+                    name: a.Name,
+                    owner: getOwnerName(a),
+                    vertical: normalizeVertical(a.Commercial_Vertical__c),
+                    prioritization: a.Overall_Account_Prioritization__c || '',
+                    lastActivity: a.LastActivityDate
+                }));
+        }
+
+        function calculateStage0BySource() {
+            // Group stage 0+ opps by owner and source
+            const stage0Opps = state.opportunities.filter(opp =>
+                opp.StageName && opp.StageName.includes('0')
+            );
+
+            const grouped = {};
+            for (const opp of stage0Opps) {
+                const owner = getOwnerName(opp);
+                const source = normalizeSource(opp.Source__c) || 'Unknown';
+                const key = `${owner}|${source}`;
+
+                if (!grouped[key]) {
+                    grouped[key] = { owner, source, count: 0, amount: 0 };
+                }
+                grouped[key].count++;
+                grouped[key].amount += opp.Amount || 0;
+            }
+
+            return Object.values(grouped).sort((a, b) => b.amount - a.amount).slice(0, 20);
+        }
+
+        // =============================================================================
+        // UI RENDERING
+        // =============================================================================
+
+        function getAttainmentClass(value) {
+            if (value >= 80) return 'attainment-high';
+            if (value >= 50) return 'attainment-medium';
+            return 'attainment-low';
+        }
+
+        function renderGoalsTable() {
+            const data = calculateGoalsTable();
+            const tbody = document.getElementById('goals-body');
+
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#8899aa;">No data</td></tr>';
+                return;
+            }
+
+            let html = '';
+            let totals = {
+                mtdActuals: 0, mtdGoal: 0,
+                qtdActuals: 0, qtdGoal: 0,
+                ytdActuals: 0, ytdGoal: 0
+            };
+
+            for (const row of data) {
+                totals.mtdActuals += row.mtdActuals;
+                totals.mtdGoal += row.mtdGoal;
+                totals.qtdActuals += row.qtdActuals;
+                totals.qtdGoal += row.qtdGoal;
+                totals.ytdActuals += row.ytdActuals;
+                totals.ytdGoal += row.ytdGoal;
+
+                html += `<tr>
+                    <td>${row.accountExecutive}</td>
+                    <td class="number">${formatCurrency(row.mtdActuals)}</td>
+                    <td class="number">${formatCurrency(row.mtdGoal)}</td>
+                    <td class="number ${getAttainmentClass(row.mtdAttainment)}">${formatPercent(row.mtdAttainment)}</td>
+                    <td class="number">${formatCurrency(row.qtdActuals)}</td>
+                    <td class="number">${formatCurrency(row.qtdGoal)}</td>
+                    <td class="number ${getAttainmentClass(row.qtdAttainment)}">${formatPercent(row.qtdAttainment)}</td>
+                    <td class="number">${formatCurrency(row.ytdActuals)}</td>
+                    <td class="number">${formatCurrency(row.ytdGoal)}</td>
+                    <td class="number ${getAttainmentClass(row.ytdAttainment)}">${formatPercent(row.ytdAttainment)}</td>
+                </tr>`;
+            }
+
+            // Add totals row
+            const mtdPct = totals.mtdGoal ? (totals.mtdActuals / totals.mtdGoal * 100) : 0;
+            const qtdPct = totals.qtdGoal ? (totals.qtdActuals / totals.qtdGoal * 100) : 0;
+            const ytdPct = totals.ytdGoal ? (totals.ytdActuals / totals.ytdGoal * 100) : 0;
+
+            html += `<tr class="summary-row">
+                <td>Total</td>
+                <td class="number">${formatCurrency(totals.mtdActuals)}</td>
+                <td class="number">${formatCurrency(totals.mtdGoal)}</td>
+                <td class="number ${getAttainmentClass(mtdPct)}">${formatPercent(mtdPct)}</td>
+                <td class="number">${formatCurrency(totals.qtdActuals)}</td>
+                <td class="number">${formatCurrency(totals.qtdGoal)}</td>
+                <td class="number ${getAttainmentClass(qtdPct)}">${formatPercent(qtdPct)}</td>
+                <td class="number">${formatCurrency(totals.ytdActuals)}</td>
+                <td class="number">${formatCurrency(totals.ytdGoal)}</td>
+                <td class="number ${getAttainmentClass(ytdPct)}">${formatPercent(ytdPct)}</td>
+            </tr>`;
+
+            tbody.innerHTML = html;
+        }
+
+        function renderPipelineTable(tableId, data) {
+            const tbody = document.getElementById(tableId);
+
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8899aa;">No data</td></tr>';
+                return;
+            }
+
+            let html = '';
+            for (const row of data) {
+                html += `<tr>
+                    <td>${row.owner}</td>
+                    <td>${row.type}</td>
+                    <td>${row.name}</td>
+                    <td>${formatDate(row.qualifiedDate)}</td>
+                    <td><span class="stage-badge">${row.stage}</span></td>
+                    <td class="number">${formatCurrency(row.amount)}</td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        function renderActivityTable(tableId, data) {
+            const tbody = document.getElementById(tableId);
+
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#8899aa;">No data</td></tr>';
+                return;
+            }
+
+            let html = '';
+            for (const row of data) {
+                html += `<tr>
+                    <td>${row.assignedTo}</td>
+                    <td class="number">${row.last7Days}</td>
+                    <td class="number">${row.last30Days}</td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        function renderAccountsTouchedTable() {
+            const data = calculateAccountsTouched();
+            const tbody = document.getElementById('accounts-touched-body');
+
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8899aa;">No data</td></tr>';
+                return;
+            }
+
+            let html = '';
+            for (const row of data) {
+                html += `<tr>
+                    <td>${row.owner}</td>
+                    <td class="number">${row.total}</td>
+                    <td class="number">${row.touched7}</td>
+                    <td class="number">${formatPercent(row.pct7)}</td>
+                    <td class="number">${row.touched30}</td>
+                    <td class="number">${formatPercent(row.pct30)}</td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        function renderInactiveAccountsTable() {
+            const data = calculateInactiveAccounts();
+            const tbody = document.getElementById('accounts-inactive-body');
+
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8899aa;">No data</td></tr>';
+                return;
+            }
+
+            let html = '';
+            for (const row of data) {
+                html += `<tr>
+                    <td>${row.name}</td>
+                    <td>${row.owner}</td>
+                    <td>${row.vertical || '-'}</td>
+                    <td>${row.prioritization}</td>
+                    <td>${formatDate(row.lastActivity)}</td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        function renderStage0Table() {
+            const data = calculateStage0BySource();
+            const tbody = document.getElementById('stage0-body');
+
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#8899aa;">No data</td></tr>';
+                return;
+            }
+
+            let html = '';
+            for (const row of data) {
+                html += `<tr>
+                    <td>${row.owner}</td>
+                    <td>${row.source}</td>
+                    <td class="number">${row.count}</td>
+                    <td class="number">${formatCurrency(row.amount)}</td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        function renderAllTables() {
+            renderGoalsTable();
+            renderPipelineTable('mtd-pipeline-body', calculatePipelineData('mtd'));
+            renderPipelineTable('qtd-pipeline-body', calculatePipelineData('qtd'));
+
+            const { emails, meetings } = calculateActivityMetrics();
+            renderActivityTable('emails-body', emails);
+            renderActivityTable('meetings-body', meetings);
+
+            renderStage0Table();
+            renderPipelineTable('prequalified-body', calculatePipelineData('qtd'));
+            renderAccountsTouchedTable();
+            renderInactiveAccountsTable();
+
+            // Populate filters
+            populateFilters();
+
+            // Update timestamp
+            document.getElementById('last-updated').textContent = new Date().toLocaleString();
+        }
+
+        function populateFilters() {
+            const aeSelect = document.getElementById('filter-ae');
+            const verticalSelect = document.getElementById('filter-vertical');
+
+            // Clear existing options (keep first "All" option)
+            aeSelect.innerHTML = '<option value="">All</option>';
+            verticalSelect.innerHTML = '<option value="">All</option>';
+
+            // Add AEs
+            getAllTeamMembers().forEach(ae => {
+                aeSelect.innerHTML += `<option value="${ae}">${ae}</option>`;
+            });
+
+            // Add verticals
+            const verticals = new Set();
+            state.opportunities.forEach(opp => {
+                const v = normalizeVertical(opp.Fml_Customer_Vertical__c);
+                if (v) verticals.add(v);
+            });
+            Array.from(verticals).sort().forEach(v => {
+                verticalSelect.innerHTML += `<option value="${v}">${v}</option>`;
+            });
+        }
+
+        function applyFilters() {
+            // Re-render tables with filters applied
+            // For now, just re-render (filters can be implemented later)
+            renderAllTables();
+        }
+
+        // =============================================================================
+        // INITIALIZATION
+        // =============================================================================
+
+        function setLoadingStatus(text) {
+            document.getElementById('loading-status').textContent = text;
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('login-error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        async function refreshData() {
+            const statusDot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+
+            statusDot.classList.add('loading');
+            statusText.textContent = 'Refreshing...';
+
+            try {
+                await fetchAllData();
+                renderAllTables();
+                statusText.textContent = 'Connected';
+            } catch (error) {
+                statusText.textContent = 'Error: ' + error.message;
+                console.error(error);
+            } finally {
+                statusDot.classList.remove('loading');
+            }
+        }
+
+        async function init() {
+            // Check for OAuth callback or existing session
+            if (checkAuthCallback()) {
+                // Show loading spinner
+                document.getElementById('login-container').style.display = 'none';
+                document.getElementById('loading-spinner').style.display = 'flex';
+
+                try {
+                    await getUserInfo();
+                    await fetchAllData();
+                    renderAllTables();
+
+                    // Hide overlay
+                    document.getElementById('loading-overlay').classList.add('hidden');
+                } catch (error) {
+                    console.error('Init error:', error);
+                    showError(error.message);
+                    document.getElementById('login-container').style.display = 'block';
+                    document.getElementById('loading-spinner').style.display = 'none';
+                }
+            }
+            // If no auth, show login button (default state)
+        }
+
+        // Start
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
