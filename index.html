@@ -718,105 +718,31 @@
         };
 
         // =============================================================================
-        // SALESFORCE OAUTH WITH PKCE (for External Client Apps)
+        // SALESFORCE OAUTH (Implicit Flow for Static Sites)
         // =============================================================================
 
-        // Generate random string for PKCE
-        function generateRandomString(length) {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
-            let result = '';
-            const randomValues = new Uint8Array(length);
-            crypto.getRandomValues(randomValues);
-            for (let i = 0; i < length; i++) {
-                result += chars[randomValues[i] % chars.length];
-            }
-            return result;
-        }
-
-        // Generate code challenge from verifier (SHA-256)
-        async function generateCodeChallenge(verifier) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(verifier);
-            const digest = await crypto.subtle.digest('SHA-256', data);
-            const base64 = btoa(String.fromCharCode(...new Uint8Array(digest)));
-            return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        }
-
-        async function loginToSalesforce() {
-            // Generate PKCE values
-            const codeVerifier = generateRandomString(128);
-            const codeChallenge = await generateCodeChallenge(codeVerifier);
-
-            // Store verifier for token exchange
-            sessionStorage.setItem('sf_code_verifier', codeVerifier);
-
+        function loginToSalesforce() {
+            // Use implicit flow (response_type=token) which works from static sites
             const authUrl = `${CONFIG.loginUrl}/services/oauth2/authorize?` +
-                `response_type=code&` +
+                `response_type=token&` +
                 `client_id=${encodeURIComponent(CONFIG.clientId)}&` +
-                `redirect_uri=${encodeURIComponent(CONFIG.redirectUri)}&` +
-                `code_challenge=${encodeURIComponent(codeChallenge)}&` +
-                `code_challenge_method=S256`;
+                `redirect_uri=${encodeURIComponent(CONFIG.redirectUri)}`;
 
             window.location.href = authUrl;
         }
 
-        async function exchangeCodeForToken(code) {
-            const codeVerifier = sessionStorage.getItem('sf_code_verifier');
-
-            const params = new URLSearchParams();
-            params.append('grant_type', 'authorization_code');
-            params.append('client_id', CONFIG.clientId);
-            params.append('redirect_uri', CONFIG.redirectUri);
-            params.append('code', code);
-            params.append('code_verifier', codeVerifier);
-
-            const response = await fetch(`${CONFIG.loginUrl}/services/oauth2/token`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                body: params.toString()
-            });
-
-            if (!response.ok) {
-                const error = await response.text();
-                throw new Error(`Token exchange failed: ${error}`);
-            }
-
-            const data = await response.json();
-            return data;
-        }
-
         async function checkAuthCallback() {
-            // Check for authorization code in URL params
+            // Check for error in URL
             const urlParams = new URLSearchParams(window.location.search);
-            const code = urlParams.get('code');
+            const error = urlParams.get('error');
+            const errorDesc = urlParams.get('error_description');
 
-            if (code) {
-                try {
-                    setLoadingStatus('Exchanging authorization code...');
-                    const tokenData = await exchangeCodeForToken(code);
-
-                    state.accessToken = tokenData.access_token;
-                    state.instanceUrl = tokenData.instance_url;
-
-                    // Store in session
-                    sessionStorage.setItem('sf_access_token', tokenData.access_token);
-                    sessionStorage.setItem('sf_instance_url', tokenData.instance_url);
-                    sessionStorage.removeItem('sf_code_verifier');
-
-                    // Clear the URL params
-                    history.replaceState(null, null, window.location.pathname);
-
-                    return true;
-                } catch (error) {
-                    console.error('Token exchange error:', error);
-                    showError(error.message);
-                    return false;
-                }
+            if (error) {
+                showError(`${error}: ${decodeURIComponent(errorDesc || '')}`);
+                return false;
             }
 
-            // Check if we have a hash with access token (implicit flow fallback)
+            // Check if we have a hash with access token (implicit flow)
             if (window.location.hash) {
                 const params = new URLSearchParams(window.location.hash.substring(1));
                 const accessToken = params.get('access_token');
@@ -829,13 +755,14 @@
                     sessionStorage.setItem('sf_access_token', accessToken);
                     sessionStorage.setItem('sf_instance_url', instanceUrl);
 
+                    // Clear the hash
                     history.replaceState(null, null, window.location.pathname);
 
                     return true;
                 }
             }
 
-            // Check session storage
+            // Check session storage for existing session
             const storedToken = sessionStorage.getItem('sf_access_token');
             const storedInstance = sessionStorage.getItem('sf_instance_url');
 
@@ -851,7 +778,6 @@
         function logout() {
             sessionStorage.removeItem('sf_access_token');
             sessionStorage.removeItem('sf_instance_url');
-            sessionStorage.removeItem('sf_code_verifier');
             state.accessToken = null;
             state.instanceUrl = null;
             document.getElementById('loading-overlay').classList.remove('hidden');
