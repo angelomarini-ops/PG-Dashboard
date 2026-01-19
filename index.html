@@ -664,9 +664,8 @@
 
         const CONFIG = {
             // Salesforce Connected App settings
-            // You need to create a Connected App in Salesforce Setup
-            clientId: '3MVG9pRzvMkjMb6lQhPSkrCbTuQBJB7HoL7WVaXSHgDDLgqUiT3kMQYRmNnGUCqfLaKYvJ4Wlj0nA_flbFZnB',
-            redirectUri: window.location.origin + window.location.pathname,
+            clientId: '3MVG9riCAn8HHkYWEvxsjdx4IAhwdfB.ZTu5XsKyG0fP2XUB319NaHyWIyl9IYe5iAJpPdRgMjrzjhN0bZ.Od',
+            redirectUri: 'https://angelomarini-ops.github.io/PG-Dashboard/',
             loginUrl: 'https://login.salesforce.com',
 
             // Team mappings (from CRMA recipe)
@@ -719,20 +718,105 @@
         };
 
         // =============================================================================
-        // SALESFORCE OAUTH
+        // SALESFORCE OAUTH WITH PKCE (for External Client Apps)
         // =============================================================================
 
-        function loginToSalesforce() {
+        // Generate random string for PKCE
+        function generateRandomString(length) {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+            let result = '';
+            const randomValues = new Uint8Array(length);
+            crypto.getRandomValues(randomValues);
+            for (let i = 0; i < length; i++) {
+                result += chars[randomValues[i] % chars.length];
+            }
+            return result;
+        }
+
+        // Generate code challenge from verifier (SHA-256)
+        async function generateCodeChallenge(verifier) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(verifier);
+            const digest = await crypto.subtle.digest('SHA-256', data);
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(digest)));
+            return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        async function loginToSalesforce() {
+            // Generate PKCE values
+            const codeVerifier = generateRandomString(128);
+            const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+            // Store verifier for token exchange
+            sessionStorage.setItem('sf_code_verifier', codeVerifier);
+
             const authUrl = `${CONFIG.loginUrl}/services/oauth2/authorize?` +
-                `response_type=token&` +
+                `response_type=code&` +
                 `client_id=${encodeURIComponent(CONFIG.clientId)}&` +
-                `redirect_uri=${encodeURIComponent(CONFIG.redirectUri)}`;
+                `redirect_uri=${encodeURIComponent(CONFIG.redirectUri)}&` +
+                `code_challenge=${encodeURIComponent(codeChallenge)}&` +
+                `code_challenge_method=S256`;
 
             window.location.href = authUrl;
         }
 
-        function checkAuthCallback() {
-            // Check if we have a hash with access token (OAuth callback)
+        async function exchangeCodeForToken(code) {
+            const codeVerifier = sessionStorage.getItem('sf_code_verifier');
+
+            const params = new URLSearchParams();
+            params.append('grant_type', 'authorization_code');
+            params.append('client_id', CONFIG.clientId);
+            params.append('redirect_uri', CONFIG.redirectUri);
+            params.append('code', code);
+            params.append('code_verifier', codeVerifier);
+
+            const response = await fetch(`${CONFIG.loginUrl}/services/oauth2/token`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: params.toString()
+            });
+
+            if (!response.ok) {
+                const error = await response.text();
+                throw new Error(`Token exchange failed: ${error}`);
+            }
+
+            const data = await response.json();
+            return data;
+        }
+
+        async function checkAuthCallback() {
+            // Check for authorization code in URL params
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                try {
+                    setLoadingStatus('Exchanging authorization code...');
+                    const tokenData = await exchangeCodeForToken(code);
+
+                    state.accessToken = tokenData.access_token;
+                    state.instanceUrl = tokenData.instance_url;
+
+                    // Store in session
+                    sessionStorage.setItem('sf_access_token', tokenData.access_token);
+                    sessionStorage.setItem('sf_instance_url', tokenData.instance_url);
+                    sessionStorage.removeItem('sf_code_verifier');
+
+                    // Clear the URL params
+                    history.replaceState(null, null, window.location.pathname);
+
+                    return true;
+                } catch (error) {
+                    console.error('Token exchange error:', error);
+                    showError(error.message);
+                    return false;
+                }
+            }
+
+            // Check if we have a hash with access token (implicit flow fallback)
             if (window.location.hash) {
                 const params = new URLSearchParams(window.location.hash.substring(1));
                 const accessToken = params.get('access_token');
@@ -742,11 +826,9 @@
                     state.accessToken = accessToken;
                     state.instanceUrl = instanceUrl;
 
-                    // Store in session
                     sessionStorage.setItem('sf_access_token', accessToken);
                     sessionStorage.setItem('sf_instance_url', instanceUrl);
 
-                    // Clear the hash
                     history.replaceState(null, null, window.location.pathname);
 
                     return true;
@@ -769,6 +851,7 @@
         function logout() {
             sessionStorage.removeItem('sf_access_token');
             sessionStorage.removeItem('sf_instance_url');
+            sessionStorage.removeItem('sf_code_verifier');
             state.accessToken = null;
             state.instanceUrl = null;
             document.getElementById('loading-overlay').classList.remove('hidden');
@@ -1438,13 +1521,17 @@
         }
 
         async function init() {
-            // Check for OAuth callback or existing session
-            if (checkAuthCallback()) {
-                // Show loading spinner
-                document.getElementById('login-container').style.display = 'none';
-                document.getElementById('loading-spinner').style.display = 'flex';
+            // Show loading spinner while checking auth
+            document.getElementById('login-container').style.display = 'none';
+            document.getElementById('loading-spinner').style.display = 'flex';
+            setLoadingStatus('Checking authentication...');
 
+            // Check for OAuth callback or existing session
+            const isAuthenticated = await checkAuthCallback();
+
+            if (isAuthenticated) {
                 try {
+                    setLoadingStatus('Getting user info...');
                     await getUserInfo();
                     await fetchAllData();
                     renderAllTables();
@@ -1457,8 +1544,11 @@
                     document.getElementById('login-container').style.display = 'block';
                     document.getElementById('loading-spinner').style.display = 'none';
                 }
+            } else {
+                // Show login button
+                document.getElementById('login-container').style.display = 'block';
+                document.getElementById('loading-spinner').style.display = 'none';
             }
-            // If no auth, show login button (default state)
         }
 
         // Start
