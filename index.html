@@ -886,7 +886,9 @@
                            Start_Date__c, End_Date__c, Week_Counter__c,
                            Weekly_Pipeline_Build_Goal__c, Weekly_Pipeline_Build__c,
                            Cumulative_Pipeline_Build_Goal__c, Cumulative_Pipeline_Build__c,
-                           Quarter_Pipeline_Goal__c, Quota__c
+                           Quarter_Pipeline_Goal__c, Quota__c,
+                           Weekly_Qualified_Opportunities_Goal__c,
+                           Cumulative_Qualified_Opportunities_Goal__c
                     FROM Goal__c
                     WHERE Start_Date__c >= LAST_N_DAYS:365
                     ORDER BY Start_Date__c DESC
@@ -997,64 +999,138 @@
         // DASHBOARD CALCULATIONS
         // =============================================================================
 
+        // Current filter state
+        let currentFilters = {
+            ae: '',
+            period: 'current_month',
+            vertical: ''
+        };
+
         function calculateGoalsTable() {
             const today = new Date();
             const monthStart = getMonthStart();
             const quarterStart = getFiscalQuarterStart();
             const yearStart = getFiscalYearStart();
 
-            const teamMembers = getAllTeamMembers();
+            // Get all unique goal owners from goals data
+            const goalOwners = new Set();
+            state.goals.forEach(g => {
+                const owner = getOwnerName(g);
+                if (owner) goalOwners.add(owner);
+            });
+
+            // Also add team members for completeness
+            getAllTeamMembers().forEach(m => goalOwners.add(m));
+
             const results = [];
 
-            for (const member of teamMembers) {
-                // Filter qualified opps for this member
+            for (const member of goalOwners) {
+                // Filter qualified opps for this member (apply AE filter)
+                if (currentFilters.ae && !member.toLowerCase().includes(currentFilters.ae.toLowerCase())) {
+                    continue;
+                }
+
                 const memberOpps = state.opportunities.filter(opp => {
                     const ownerName = getOwnerName(opp);
-                    return ownerName.toLowerCase().includes(member.toLowerCase()) &&
-                           opp.Qualified_Date__c;
+                    const matchesOwner = ownerName.toLowerCase().includes(member.toLowerCase());
+                    const hasQualifiedDate = opp.Qualified_Date__c;
+
+                    // Apply vertical filter
+                    if (currentFilters.vertical) {
+                        const oppVertical = normalizeVertical(opp.Fml_Customer_Vertical__c);
+                        if (oppVertical !== currentFilters.vertical) return false;
+                    }
+
+                    return matchesOwner && hasQualifiedDate;
                 });
 
-                // MTD
+                // MTD - Count of qualified opportunities
                 const mtdOpps = memberOpps.filter(opp =>
                     parseDate(opp.Qualified_Date__c) >= monthStart
                 );
-                const mtdActuals = mtdOpps.reduce((sum, opp) => sum + (opp.Amount || 0), 0);
+                const mtdActuals = mtdOpps.length; // COUNT, not Amount
 
-                // QTD
+                // QTD - Count of qualified opportunities
                 const qtdOpps = memberOpps.filter(opp =>
                     parseDate(opp.Qualified_Date__c) >= quarterStart
                 );
-                const qtdActuals = qtdOpps.reduce((sum, opp) => sum + (opp.Amount || 0), 0);
+                const qtdActuals = qtdOpps.length; // COUNT, not Amount
 
-                // YTD
+                // YTD - Count of qualified opportunities
                 const ytdOpps = memberOpps.filter(opp =>
                     parseDate(opp.Qualified_Date__c) >= yearStart
                 );
-                const ytdActuals = ytdOpps.reduce((sum, opp) => sum + (opp.Amount || 0), 0);
+                const ytdActuals = ytdOpps.length; // COUNT, not Amount
 
-                // Goals (simplified - use actual goals if available)
-                const memberGoals = state.goals.filter(g =>
-                    getOwnerName(g).toLowerCase().includes(member.toLowerCase())
-                );
-                const quarterGoal = memberGoals.reduce((sum, g) =>
-                    sum + (g.Quarter_Pipeline_Goal__c || 0), 0) || 300000;
-                const mtdGoal = quarterGoal / 3;
-                const ytdGoal = quarterGoal * 4;
+                // Get goals for this member - find current goals
+                const memberGoals = state.goals.filter(g => {
+                    const ownerName = getOwnerName(g);
+                    return ownerName.toLowerCase().includes(member.toLowerCase());
+                });
 
-                if (mtdActuals > 0 || qtdActuals > 0 || ytdActuals > 0) {
+                // Calculate MTD goal based on weekly goals within current month
+                const currentMonthGoals = memberGoals.filter(g => {
+                    const startDate = parseDate(g.Start_Date__c);
+                    return startDate && startDate >= monthStart && startDate <= today;
+                });
+
+                // Sum up weekly goals for MTD, or use cumulative
+                let mtdGoal = currentMonthGoals.reduce((sum, g) =>
+                    sum + (g.Weekly_Qualified_Opportunities_Goal__c || 0), 0);
+
+                // If no weekly goals found, try to calculate from cumulative
+                if (mtdGoal === 0 && memberGoals.length > 0) {
+                    const latestGoal = memberGoals[0]; // Already sorted by date DESC
+                    mtdGoal = latestGoal.Cumulative_Qualified_Opportunities_Goal__c || 0;
+                }
+
+                // Calculate QTD goal - sum weekly goals in quarter or use cumulative
+                const currentQuarterGoals = memberGoals.filter(g => {
+                    const startDate = parseDate(g.Start_Date__c);
+                    return startDate && startDate >= quarterStart && startDate <= today;
+                });
+
+                let qtdGoal = currentQuarterGoals.reduce((sum, g) =>
+                    sum + (g.Weekly_Qualified_Opportunities_Goal__c || 0), 0);
+
+                if (qtdGoal === 0 && memberGoals.length > 0) {
+                    const latestGoal = memberGoals[0];
+                    qtdGoal = (latestGoal.Cumulative_Qualified_Opportunities_Goal__c || 0) * 13; // ~13 weeks per quarter
+                }
+
+                // Calculate YTD goal
+                const currentYearGoals = memberGoals.filter(g => {
+                    const startDate = parseDate(g.Start_Date__c);
+                    return startDate && startDate >= yearStart && startDate <= today;
+                });
+
+                let ytdGoal = currentYearGoals.reduce((sum, g) =>
+                    sum + (g.Weekly_Qualified_Opportunities_Goal__c || 0), 0);
+
+                if (ytdGoal === 0 && memberGoals.length > 0) {
+                    const latestGoal = memberGoals[0];
+                    ytdGoal = (latestGoal.Cumulative_Qualified_Opportunities_Goal__c || 0) * 52; // 52 weeks per year
+                }
+
+                // Show everyone with goals, even if they have 0 actuals
+                if (memberGoals.length > 0 || mtdActuals > 0 || qtdActuals > 0 || ytdActuals > 0) {
                     results.push({
                         accountExecutive: member,
-                        mtdActuals, mtdGoal,
+                        mtdActuals,
+                        mtdGoal,
                         mtdAttainment: mtdGoal ? (mtdActuals / mtdGoal * 100) : 0,
-                        qtdActuals, qtdGoal: quarterGoal,
-                        qtdAttainment: quarterGoal ? (qtdActuals / quarterGoal * 100) : 0,
-                        ytdActuals, ytdGoal,
+                        qtdActuals,
+                        qtdGoal,
+                        qtdAttainment: qtdGoal ? (qtdActuals / qtdGoal * 100) : 0,
+                        ytdActuals,
+                        ytdGoal,
                         ytdAttainment: ytdGoal ? (ytdActuals / ytdGoal * 100) : 0
                     });
                 }
             }
 
-            return results;
+            // Sort by name
+            return results.sort((a, b) => a.accountExecutive.localeCompare(b.accountExecutive));
         }
 
         function calculatePipelineData(period) {
@@ -1062,7 +1138,23 @@
             const startDate = period === 'mtd' ? getMonthStart() : getFiscalQuarterStart();
 
             return state.opportunities
-                .filter(opp => opp.Qualified_Date__c && parseDate(opp.Qualified_Date__c) >= startDate)
+                .filter(opp => {
+                    if (!opp.Qualified_Date__c || parseDate(opp.Qualified_Date__c) < startDate) return false;
+
+                    // Apply AE filter
+                    if (currentFilters.ae) {
+                        const owner = getOwnerName(opp);
+                        if (!owner.toLowerCase().includes(currentFilters.ae.toLowerCase())) return false;
+                    }
+
+                    // Apply vertical filter
+                    if (currentFilters.vertical) {
+                        const vertical = normalizeVertical(opp.Fml_Customer_Vertical__c);
+                        if (vertical !== currentFilters.vertical) return false;
+                    }
+
+                    return true;
+                })
                 .map(opp => ({
                     owner: getOwnerName(opp),
                     type: opp.Type || '',
@@ -1085,6 +1177,11 @@
             const meetings = [];
 
             for (const member of teamMembers) {
+                // Apply AE filter
+                if (currentFilters.ae && !member.toLowerCase().includes(currentFilters.ae.toLowerCase())) {
+                    continue;
+                }
+
                 // Emails
                 const memberEmails = state.tasks.filter(t =>
                     getOwnerName(t).toLowerCase().includes(member.toLowerCase()) &&
@@ -1122,6 +1219,18 @@
             for (const account of state.accounts) {
                 const owner = getOwnerName(account);
                 if (!owner) continue;
+
+                // Apply AE filter
+                if (currentFilters.ae && !owner.toLowerCase().includes(currentFilters.ae.toLowerCase())) {
+                    continue;
+                }
+
+                // Apply vertical filter
+                if (currentFilters.vertical) {
+                    const vertical = normalizeVertical(account.Commercial_Vertical__c);
+                    if (vertical !== currentFilters.vertical) continue;
+                }
+
                 if (!ownerAccounts[owner]) ownerAccounts[owner] = [];
                 ownerAccounts[owner].push(account);
             }
@@ -1154,7 +1263,23 @@
             const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
 
             return state.accounts
-                .filter(a => !a.LastActivityDate || parseDate(a.LastActivityDate) < thirtyDaysAgo)
+                .filter(a => {
+                    if (a.LastActivityDate && parseDate(a.LastActivityDate) >= thirtyDaysAgo) return false;
+
+                    // Apply AE filter
+                    if (currentFilters.ae) {
+                        const owner = getOwnerName(a);
+                        if (!owner.toLowerCase().includes(currentFilters.ae.toLowerCase())) return false;
+                    }
+
+                    // Apply vertical filter
+                    if (currentFilters.vertical) {
+                        const vertical = normalizeVertical(a.Commercial_Vertical__c);
+                        if (vertical !== currentFilters.vertical) return false;
+                    }
+
+                    return true;
+                })
                 .slice(0, 50)
                 .map(a => ({
                     name: a.Name,
@@ -1167,9 +1292,23 @@
 
         function calculateStage0BySource() {
             // Group stage 0+ opps by owner and source
-            const stage0Opps = state.opportunities.filter(opp =>
-                opp.StageName && opp.StageName.includes('0')
-            );
+            const stage0Opps = state.opportunities.filter(opp => {
+                if (!opp.StageName || !opp.StageName.includes('0')) return false;
+
+                // Apply AE filter
+                if (currentFilters.ae) {
+                    const owner = getOwnerName(opp);
+                    if (!owner.toLowerCase().includes(currentFilters.ae.toLowerCase())) return false;
+                }
+
+                // Apply vertical filter
+                if (currentFilters.vertical) {
+                    const vertical = normalizeVertical(opp.Fml_Customer_Vertical__c);
+                    if (vertical !== currentFilters.vertical) return false;
+                }
+
+                return true;
+            });
 
             const grouped = {};
             for (const opp of stage0Opps) {
@@ -1195,6 +1334,12 @@
             if (value >= 80) return 'attainment-high';
             if (value >= 50) return 'attainment-medium';
             return 'attainment-low';
+        }
+
+        function formatNumber(value) {
+            if (value === null || value === undefined) return '-';
+            // Format with up to 2 decimal places, but remove trailing zeros
+            return parseFloat(value.toFixed(2)).toString();
         }
 
         function renderGoalsTable() {
@@ -1223,14 +1368,14 @@
 
                 html += `<tr>
                     <td>${row.accountExecutive}</td>
-                    <td class="number">${formatCurrency(row.mtdActuals)}</td>
-                    <td class="number">${formatCurrency(row.mtdGoal)}</td>
+                    <td class="number">${row.mtdActuals}</td>
+                    <td class="number">${formatNumber(row.mtdGoal)}</td>
                     <td class="number ${getAttainmentClass(row.mtdAttainment)}">${formatPercent(row.mtdAttainment)}</td>
-                    <td class="number">${formatCurrency(row.qtdActuals)}</td>
-                    <td class="number">${formatCurrency(row.qtdGoal)}</td>
+                    <td class="number">${row.qtdActuals}</td>
+                    <td class="number">${formatNumber(row.qtdGoal)}</td>
                     <td class="number ${getAttainmentClass(row.qtdAttainment)}">${formatPercent(row.qtdAttainment)}</td>
-                    <td class="number">${formatCurrency(row.ytdActuals)}</td>
-                    <td class="number">${formatCurrency(row.ytdGoal)}</td>
+                    <td class="number">${row.ytdActuals}</td>
+                    <td class="number">${formatNumber(row.ytdGoal)}</td>
                     <td class="number ${getAttainmentClass(row.ytdAttainment)}">${formatPercent(row.ytdAttainment)}</td>
                 </tr>`;
             }
@@ -1242,14 +1387,14 @@
 
             html += `<tr class="summary-row">
                 <td>Total</td>
-                <td class="number">${formatCurrency(totals.mtdActuals)}</td>
-                <td class="number">${formatCurrency(totals.mtdGoal)}</td>
+                <td class="number">${totals.mtdActuals}</td>
+                <td class="number">${formatNumber(totals.mtdGoal)}</td>
                 <td class="number ${getAttainmentClass(mtdPct)}">${formatPercent(mtdPct)}</td>
-                <td class="number">${formatCurrency(totals.qtdActuals)}</td>
-                <td class="number">${formatCurrency(totals.qtdGoal)}</td>
+                <td class="number">${totals.qtdActuals}</td>
+                <td class="number">${formatNumber(totals.qtdGoal)}</td>
                 <td class="number ${getAttainmentClass(qtdPct)}">${formatPercent(qtdPct)}</td>
-                <td class="number">${formatCurrency(totals.ytdActuals)}</td>
-                <td class="number">${formatCurrency(totals.ytdGoal)}</td>
+                <td class="number">${totals.ytdActuals}</td>
+                <td class="number">${formatNumber(totals.ytdGoal)}</td>
                 <td class="number ${getAttainmentClass(ytdPct)}">${formatPercent(ytdPct)}</td>
             </tr>`;
 
@@ -1392,8 +1537,15 @@
             aeSelect.innerHTML = '<option value="">All</option>';
             verticalSelect.innerHTML = '<option value="">All</option>';
 
-            // Add AEs
-            getAllTeamMembers().forEach(ae => {
+            // Add AEs from goals data AND team members
+            const allAEs = new Set();
+            getAllTeamMembers().forEach(ae => allAEs.add(ae));
+            state.goals.forEach(g => {
+                const owner = getOwnerName(g);
+                if (owner) allAEs.add(owner);
+            });
+
+            Array.from(allAEs).sort().forEach(ae => {
                 aeSelect.innerHTML += `<option value="${ae}">${ae}</option>`;
             });
 
@@ -1403,14 +1555,22 @@
                 const v = normalizeVertical(opp.Fml_Customer_Vertical__c);
                 if (v) verticals.add(v);
             });
+            state.accounts.forEach(acc => {
+                const v = normalizeVertical(acc.Commercial_Vertical__c);
+                if (v) verticals.add(v);
+            });
             Array.from(verticals).sort().forEach(v => {
                 verticalSelect.innerHTML += `<option value="${v}">${v}</option>`;
             });
         }
 
         function applyFilters() {
-            // Re-render tables with filters applied
-            // For now, just re-render (filters can be implemented later)
+            // Update filter state
+            currentFilters.ae = document.getElementById('filter-ae').value;
+            currentFilters.period = document.getElementById('filter-period').value;
+            currentFilters.vertical = document.getElementById('filter-vertical').value;
+
+            // Re-render all tables with new filters
             renderAllTables();
         }
 
