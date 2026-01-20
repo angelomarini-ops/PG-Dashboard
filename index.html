@@ -888,7 +888,8 @@
                            Cumulative_Pipeline_Build_Goal__c, Cumulative_Pipeline_Build__c,
                            Quarter_Pipeline_Goal__c, Quota__c,
                            Weekly_Qualified_Opportunities_Goal__c,
-                           Cumulative_Qualified_Opportunities_Goal__c
+                           Cumulative_Qualified_Opportunities_Goal__c,
+                           Goal_Type__c, Customer_Vertical_Picklist__c, Channel__c
                     FROM Goal__c
                     WHERE Start_Date__c >= LAST_N_DAYS:365
                     ORDER BY Start_Date__c DESC
@@ -1006,15 +1007,53 @@
             vertical: ''
         };
 
+        // CRMA-style qualified opportunity filter
+        // Qualified = NOT in pre-qualification stages AND NOT excluded types (unless Renewal with Amount > 0)
+        const PREQUAL_STAGES = ["0.5 Qualifying", "0. Pipeline Generation", "0. Qualifying"];
+        const EXCLUDED_TYPES = ["Churn", "Downgrade", "Plan Migration", "Renewal", "Partners", "Step-up"];
+
+        function isQualifiedOpportunity(opp) {
+            const stage = opp.StageName || null;
+            const type = opp.Type || null;
+            const amount = opp.Amount || 0;
+
+            // Stage check: NOT in pre-qual stages (or null is OK)
+            const stageOK = !stage || !PREQUAL_STAGES.includes(stage);
+
+            // Type check: NOT in excluded types (or null is OK)
+            const typeOK = !type || !EXCLUDED_TYPES.includes(type);
+
+            // Special case: Renewal with Amount > 0 is allowed
+            const isAllowedRenewal = type === "Renewal" && amount > 0;
+
+            // Must pass both stage and type checks, OR be an allowed renewal
+            return (stageOK && typeOK) || isAllowedRenewal;
+        }
+
+        function isPreQualifiedOpportunity(opp) {
+            const stage = opp.StageName || null;
+            const type = opp.Type || null;
+
+            // Pre-qualified = IN pre-qualification stages AND NOT excluded types (except Partners is excluded)
+            const prequalExcludedTypes = ["Churn", "Downgrade", "Plan Migration", "Partners"];
+            return stage && PREQUAL_STAGES.includes(stage) &&
+                   (!type || !prequalExcludedTypes.includes(type));
+        }
+
         function calculateGoalsTable() {
             const today = new Date();
             const monthStart = getMonthStart();
             const quarterStart = getFiscalQuarterStart();
             const yearStart = getFiscalYearStart();
 
-            // Get all unique goal owners from goals data
+            // Filter goals to only "Customer Vertical" type (per CRMA logic)
+            const customerVerticalGoals = state.goals.filter(g =>
+                g.Goal_Type__c === "Customer Vertical"
+            );
+
+            // Get all unique goal owners from filtered goals data
             const goalOwners = new Set();
-            state.goals.forEach(g => {
+            customerVerticalGoals.forEach(g => {
                 const owner = getOwnerName(g);
                 if (owner) goalOwners.add(owner);
             });
@@ -1030,10 +1069,14 @@
                     continue;
                 }
 
+                // Filter opportunities using CRMA qualified logic
                 const memberOpps = state.opportunities.filter(opp => {
                     const ownerName = getOwnerName(opp);
                     const matchesOwner = ownerName.toLowerCase().includes(member.toLowerCase());
                     const hasQualifiedDate = opp.Qualified_Date__c;
+
+                    // Must be a qualified opportunity per CRMA rules
+                    if (!isQualifiedOpportunity(opp)) return false;
 
                     // Apply vertical filter
                     if (currentFilters.vertical) {
@@ -1044,73 +1087,82 @@
                     return matchesOwner && hasQualifiedDate;
                 });
 
-                // MTD - Count of qualified opportunities
+                // MTD - Count of qualified opportunities (unique IDs)
                 const mtdOpps = memberOpps.filter(opp =>
                     parseDate(opp.Qualified_Date__c) >= monthStart
                 );
-                const mtdActuals = mtdOpps.length; // COUNT, not Amount
+                const mtdActuals = mtdOpps.length; // COUNT of unique opps
 
                 // QTD - Count of qualified opportunities
                 const qtdOpps = memberOpps.filter(opp =>
                     parseDate(opp.Qualified_Date__c) >= quarterStart
                 );
-                const qtdActuals = qtdOpps.length; // COUNT, not Amount
+                const qtdActuals = qtdOpps.length;
 
                 // YTD - Count of qualified opportunities
                 const ytdOpps = memberOpps.filter(opp =>
                     parseDate(opp.Qualified_Date__c) >= yearStart
                 );
-                const ytdActuals = ytdOpps.length; // COUNT, not Amount
+                const ytdActuals = ytdOpps.length;
 
-                // Get goals for this member - find current goals
-                const memberGoals = state.goals.filter(g => {
+                // Get goals for this member - only Customer Vertical type
+                const memberGoals = customerVerticalGoals.filter(g => {
                     const ownerName = getOwnerName(g);
                     return ownerName.toLowerCase().includes(member.toLowerCase());
                 });
 
-                // Calculate MTD goal based on weekly goals within current month
-                const currentMonthGoals = memberGoals.filter(g => {
+                // CRMA logic: For each unique Goal ID, get avg of Weekly_Qualified_Opportunities_Goal__c
+                // Then sum across all goals in the period
+                // This handles cases where goals might have multiple records per week
+
+                // Calculate MTD goal - sum weekly goals within current month
+                const mtdGoalRecords = memberGoals.filter(g => {
                     const startDate = parseDate(g.Start_Date__c);
                     return startDate && startDate >= monthStart && startDate <= today;
                 });
 
-                // Sum up weekly goals for MTD, or use cumulative
-                let mtdGoal = currentMonthGoals.reduce((sum, g) =>
-                    sum + (g.Weekly_Qualified_Opportunities_Goal__c || 0), 0);
+                // Group by Goal Id and average, then sum (per CRMA logic)
+                const mtdGoalById = {};
+                mtdGoalRecords.forEach(g => {
+                    if (!mtdGoalById[g.Id]) mtdGoalById[g.Id] = [];
+                    mtdGoalById[g.Id].push(g.Weekly_Qualified_Opportunities_Goal__c || 0);
+                });
+                let mtdGoal = Object.values(mtdGoalById).reduce((sum, vals) => {
+                    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                    return sum + avg;
+                }, 0);
 
-                // If no weekly goals found, try to calculate from cumulative
-                if (mtdGoal === 0 && memberGoals.length > 0) {
-                    const latestGoal = memberGoals[0]; // Already sorted by date DESC
-                    mtdGoal = latestGoal.Cumulative_Qualified_Opportunities_Goal__c || 0;
-                }
-
-                // Calculate QTD goal - sum weekly goals in quarter or use cumulative
-                const currentQuarterGoals = memberGoals.filter(g => {
+                // Calculate QTD goal
+                const qtdGoalRecords = memberGoals.filter(g => {
                     const startDate = parseDate(g.Start_Date__c);
                     return startDate && startDate >= quarterStart && startDate <= today;
                 });
 
-                let qtdGoal = currentQuarterGoals.reduce((sum, g) =>
-                    sum + (g.Weekly_Qualified_Opportunities_Goal__c || 0), 0);
-
-                if (qtdGoal === 0 && memberGoals.length > 0) {
-                    const latestGoal = memberGoals[0];
-                    qtdGoal = (latestGoal.Cumulative_Qualified_Opportunities_Goal__c || 0) * 13; // ~13 weeks per quarter
-                }
+                const qtdGoalById = {};
+                qtdGoalRecords.forEach(g => {
+                    if (!qtdGoalById[g.Id]) qtdGoalById[g.Id] = [];
+                    qtdGoalById[g.Id].push(g.Weekly_Qualified_Opportunities_Goal__c || 0);
+                });
+                let qtdGoal = Object.values(qtdGoalById).reduce((sum, vals) => {
+                    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                    return sum + avg;
+                }, 0);
 
                 // Calculate YTD goal
-                const currentYearGoals = memberGoals.filter(g => {
+                const ytdGoalRecords = memberGoals.filter(g => {
                     const startDate = parseDate(g.Start_Date__c);
                     return startDate && startDate >= yearStart && startDate <= today;
                 });
 
-                let ytdGoal = currentYearGoals.reduce((sum, g) =>
-                    sum + (g.Weekly_Qualified_Opportunities_Goal__c || 0), 0);
-
-                if (ytdGoal === 0 && memberGoals.length > 0) {
-                    const latestGoal = memberGoals[0];
-                    ytdGoal = (latestGoal.Cumulative_Qualified_Opportunities_Goal__c || 0) * 52; // 52 weeks per year
-                }
+                const ytdGoalById = {};
+                ytdGoalRecords.forEach(g => {
+                    if (!ytdGoalById[g.Id]) ytdGoalById[g.Id] = [];
+                    ytdGoalById[g.Id].push(g.Weekly_Qualified_Opportunities_Goal__c || 0);
+                });
+                let ytdGoal = Object.values(ytdGoalById).reduce((sum, vals) => {
+                    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                    return sum + avg;
+                }, 0);
 
                 // Show everyone with goals, even if they have 0 actuals
                 if (memberGoals.length > 0 || mtdActuals > 0 || qtdActuals > 0 || ytdActuals > 0) {
@@ -1139,7 +1191,11 @@
 
             return state.opportunities
                 .filter(opp => {
+                    // Must have qualified date in range
                     if (!opp.Qualified_Date__c || parseDate(opp.Qualified_Date__c) < startDate) return false;
+
+                    // Must be a qualified opportunity per CRMA rules
+                    if (!isQualifiedOpportunity(opp)) return false;
 
                     // Apply AE filter
                     if (currentFilters.ae) {
@@ -1160,6 +1216,37 @@
                     type: opp.Type || '',
                     name: opp.Name,
                     qualifiedDate: opp.Qualified_Date__c,
+                    stage: opp.StageName,
+                    amount: opp.Amount || 0
+                }))
+                .sort((a, b) => b.amount - a.amount)
+                .slice(0, 20);
+        }
+
+        function calculatePreQualifiedPipeline() {
+            // Pre-qualified opps: IN pre-qualification stages, NOT excluded types
+            return state.opportunities
+                .filter(opp => {
+                    // Must be pre-qualified per CRMA rules
+                    if (!isPreQualifiedOpportunity(opp)) return false;
+
+                    // Apply AE filter
+                    if (currentFilters.ae) {
+                        const owner = getOwnerName(opp);
+                        if (!owner.toLowerCase().includes(currentFilters.ae.toLowerCase())) return false;
+                    }
+
+                    // Apply vertical filter
+                    if (currentFilters.vertical) {
+                        const vertical = normalizeVertical(opp.Fml_Customer_Vertical__c);
+                        if (vertical !== currentFilters.vertical) return false;
+                    }
+
+                    return true;
+                })
+                .map(opp => ({
+                    owner: getOwnerName(opp),
+                    name: opp.Name,
                     stage: opp.StageName,
                     amount: opp.Amount || 0
                 }))
@@ -1291,9 +1378,10 @@
         }
 
         function calculateStage0BySource() {
-            // Group stage 0+ opps by owner and source
+            // Group pre-qualified stage opps by owner and source (per CRMA)
             const stage0Opps = state.opportunities.filter(opp => {
-                if (!opp.StageName || !opp.StageName.includes('0')) return false;
+                // Must be in pre-qualification stages
+                if (!isPreQualifiedOpportunity(opp)) return false;
 
                 // Apply AE filter
                 if (currentFilters.ae) {
@@ -1508,6 +1596,27 @@
             tbody.innerHTML = html;
         }
 
+        function renderPreQualifiedTable() {
+            const data = calculatePreQualifiedPipeline();
+            const tbody = document.getElementById('prequalified-body');
+
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#8899aa;">No data</td></tr>';
+                return;
+            }
+
+            let html = '';
+            for (const row of data) {
+                html += `<tr>
+                    <td>${row.owner}</td>
+                    <td>${row.name}</td>
+                    <td><span class="stage-badge">${row.stage}</span></td>
+                    <td class="number">${formatCurrency(row.amount)}</td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
         function renderAllTables() {
             renderGoalsTable();
             renderPipelineTable('mtd-pipeline-body', calculatePipelineData('mtd'));
@@ -1518,7 +1627,7 @@
             renderActivityTable('meetings-body', meetings);
 
             renderStage0Table();
-            renderPipelineTable('prequalified-body', calculatePipelineData('qtd'));
+            renderPreQualifiedTable(); // Use dedicated pre-qualified renderer
             renderAccountsTouchedTable();
             renderInactiveAccountsTable();
 
@@ -1533,16 +1642,24 @@
             const aeSelect = document.getElementById('filter-ae');
             const verticalSelect = document.getElementById('filter-vertical');
 
+            // Store current selections to preserve them after repopulating
+            const currentAE = aeSelect.value;
+            const currentVertical = verticalSelect.value;
+
             // Clear existing options (keep first "All" option)
             aeSelect.innerHTML = '<option value="">All</option>';
             verticalSelect.innerHTML = '<option value="">All</option>';
 
-            // Add AEs from goals data AND team members
+            // Add AEs from Customer Vertical goals data AND team members
             const allAEs = new Set();
             getAllTeamMembers().forEach(ae => allAEs.add(ae));
+
+            // Only get AEs from Customer Vertical type goals (per CRMA logic)
             state.goals.forEach(g => {
-                const owner = getOwnerName(g);
-                if (owner) allAEs.add(owner);
+                if (g.Goal_Type__c === "Customer Vertical") {
+                    const owner = getOwnerName(g);
+                    if (owner) allAEs.add(owner);
+                }
             });
 
             Array.from(allAEs).sort().forEach(ae => {
@@ -1562,6 +1679,10 @@
             Array.from(verticals).sort().forEach(v => {
                 verticalSelect.innerHTML += `<option value="${v}">${v}</option>`;
             });
+
+            // Restore selections if they still exist
+            if (currentAE) aeSelect.value = currentAE;
+            if (currentVertical) verticalSelect.value = currentVertical;
         }
 
         function applyFilters() {
