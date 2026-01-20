@@ -1046,14 +1046,20 @@
             const quarterStart = getFiscalQuarterStart();
             const yearStart = getFiscalYearStart();
 
-            // Filter goals to only "Customer Vertical" type (per CRMA logic)
-            const customerVerticalGoals = state.goals.filter(g =>
-                g.Goal_Type__c === "Customer Vertical"
+            // Filter goals that have Weekly_Qualified_Opportunities_Goal__c values
+            // Since Goal_Type__c is empty, we use the presence of this field value
+            const qualifiedOppsGoals = state.goals.filter(g =>
+                g.Weekly_Qualified_Opportunities_Goal__c && g.Weekly_Qualified_Opportunities_Goal__c > 0
             );
+
+            console.log('Goals with Weekly_Qualified_Opportunities_Goal__c:', qualifiedOppsGoals.length);
+            if (qualifiedOppsGoals.length > 0) {
+                console.log('Sample goal:', qualifiedOppsGoals[0]);
+            }
 
             // Get all unique goal owners from filtered goals data
             const goalOwners = new Set();
-            customerVerticalGoals.forEach(g => {
+            qualifiedOppsGoals.forEach(g => {
                 const owner = getOwnerName(g);
                 if (owner) goalOwners.add(owner);
             });
@@ -1105,64 +1111,52 @@
                 );
                 const ytdActuals = ytdOpps.length;
 
-                // Get goals for this member - only Customer Vertical type
-                const memberGoals = customerVerticalGoals.filter(g => {
+                // Get goals for this member - match by owner name
+                const memberGoals = qualifiedOppsGoals.filter(g => {
                     const ownerName = getOwnerName(g);
-                    return ownerName.toLowerCase().includes(member.toLowerCase());
+                    // Use exact match or contains for flexibility
+                    return ownerName === member ||
+                           ownerName.toLowerCase().includes(member.toLowerCase()) ||
+                           member.toLowerCase().includes(ownerName.toLowerCase());
                 });
 
-                // CRMA logic: For each unique Goal ID, get avg of Weekly_Qualified_Opportunities_Goal__c
-                // Then sum across all goals in the period
-                // This handles cases where goals might have multiple records per week
+                // Calculate goals by summing Weekly_Qualified_Opportunities_Goal__c for each week in the period
+                // Each Goal__c record represents one week's goal
 
                 // Calculate MTD goal - sum weekly goals within current month
                 const mtdGoalRecords = memberGoals.filter(g => {
                     const startDate = parseDate(g.Start_Date__c);
                     return startDate && startDate >= monthStart && startDate <= today;
                 });
+                let mtdGoal = mtdGoalRecords.reduce((sum, g) =>
+                    sum + (g.Weekly_Qualified_Opportunities_Goal__c || 0), 0);
 
-                // Group by Goal Id and average, then sum (per CRMA logic)
-                const mtdGoalById = {};
-                mtdGoalRecords.forEach(g => {
-                    if (!mtdGoalById[g.Id]) mtdGoalById[g.Id] = [];
-                    mtdGoalById[g.Id].push(g.Weekly_Qualified_Opportunities_Goal__c || 0);
-                });
-                let mtdGoal = Object.values(mtdGoalById).reduce((sum, vals) => {
-                    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-                    return sum + avg;
-                }, 0);
-
-                // Calculate QTD goal
+                // Calculate QTD goal - sum weekly goals within current quarter
                 const qtdGoalRecords = memberGoals.filter(g => {
                     const startDate = parseDate(g.Start_Date__c);
                     return startDate && startDate >= quarterStart && startDate <= today;
                 });
+                let qtdGoal = qtdGoalRecords.reduce((sum, g) =>
+                    sum + (g.Weekly_Qualified_Opportunities_Goal__c || 0), 0);
 
-                const qtdGoalById = {};
-                qtdGoalRecords.forEach(g => {
-                    if (!qtdGoalById[g.Id]) qtdGoalById[g.Id] = [];
-                    qtdGoalById[g.Id].push(g.Weekly_Qualified_Opportunities_Goal__c || 0);
-                });
-                let qtdGoal = Object.values(qtdGoalById).reduce((sum, vals) => {
-                    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-                    return sum + avg;
-                }, 0);
-
-                // Calculate YTD goal
+                // Calculate YTD goal - sum weekly goals within current fiscal year
                 const ytdGoalRecords = memberGoals.filter(g => {
                     const startDate = parseDate(g.Start_Date__c);
                     return startDate && startDate >= yearStart && startDate <= today;
                 });
+                let ytdGoal = ytdGoalRecords.reduce((sum, g) =>
+                    sum + (g.Weekly_Qualified_Opportunities_Goal__c || 0), 0);
 
-                const ytdGoalById = {};
-                ytdGoalRecords.forEach(g => {
-                    if (!ytdGoalById[g.Id]) ytdGoalById[g.Id] = [];
-                    ytdGoalById[g.Id].push(g.Weekly_Qualified_Opportunities_Goal__c || 0);
-                });
-                let ytdGoal = Object.values(ytdGoalById).reduce((sum, vals) => {
-                    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-                    return sum + avg;
-                }, 0);
+                // Debug for first member
+                if (results.length === 0) {
+                    console.log(`Goals for ${member}:`, {
+                        totalMemberGoals: memberGoals.length,
+                        mtdRecords: mtdGoalRecords.length,
+                        qtdRecords: qtdGoalRecords.length,
+                        ytdRecords: ytdGoalRecords.length,
+                        mtdGoal, qtdGoal, ytdGoal
+                    });
+                }
 
                 // Show everyone with goals, even if they have 0 actuals
                 if (memberGoals.length > 0 || mtdActuals > 0 || qtdActuals > 0 || ytdActuals > 0) {
@@ -1650,13 +1644,13 @@
             aeSelect.innerHTML = '<option value="">All</option>';
             verticalSelect.innerHTML = '<option value="">All</option>';
 
-            // Add AEs from Customer Vertical goals data AND team members
+            // Add AEs from goals data AND team members
             const allAEs = new Set();
             getAllTeamMembers().forEach(ae => allAEs.add(ae));
 
-            // Only get AEs from Customer Vertical type goals (per CRMA logic)
+            // Get AEs from goals that have Weekly_Qualified_Opportunities_Goal__c
             state.goals.forEach(g => {
-                if (g.Goal_Type__c === "Customer Vertical") {
+                if (g.Weekly_Qualified_Opportunities_Goal__c && g.Weekly_Qualified_Opportunities_Goal__c > 0) {
                     const owner = getOwnerName(g);
                     if (owner) allAEs.add(owner);
                 }
